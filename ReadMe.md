@@ -1,3 +1,8 @@
+## 🔗 Live App
+Explore it here: [Mumbai NDVI Change Detection](https://remote-sensing-483612.projects.earthengine.app/change-detection-ndvi)
+
+---
+
 # NDVI Change Detection 🌱
 
 This project uses Google Earth Engine to track vegetation change in Mumbai over time.  
