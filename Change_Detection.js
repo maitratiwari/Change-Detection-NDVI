@@ -1,4 +1,4 @@
-// 0. IMPORTS & STUDY AREA
+// IMPORTS & STUDY AREA
 var india = ee.FeatureCollection('FAO/GAUL/2015/level2');
 
 var mumbaiFC = india
@@ -16,7 +16,7 @@ var mumbaiFC = india
 var mumbai = mumbaiFC.union().geometry();
 Map.centerObject(mumbai, 9);
 
-// 1. CLOUD MASK & PREPROCESS
+// CLOUD MASK & PREPROCESS
 function maskS2Clouds(image) {
   var qa = image.select('QA60');
   var cloudBitMask = 1 << 10;
@@ -28,17 +28,22 @@ function maskS2Clouds(image) {
 }
 
 function prepS2(start, end) {
-  return ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
+  var img = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
     .filterBounds(mumbai)
     .filterDate(start, end)
     .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20))
     .map(maskS2Clouds)
-    .select(['B2','B3','B4','B8','B11','B12'])
     .median()
     .clip(mumbai);
+
+  // Mask water using NDWI
+  var ndwi = img.normalizedDifference(['B3','B8']);
+  img = img.updateMask(ndwi.lt(0.3)); // keep non-water
+
+  return img;
 }
 
-// 2. UI PANELS
+// UI PANELS
 var controlPanel = ui.Panel({
   layout: ui.Panel.Layout.flow('vertical'),
   style: {position: 'top-left', padding: '8px', width: '250px'}
@@ -60,33 +65,55 @@ var year2 = ui.Select({
   placeholder: 'End Year',
   value: '2023'
 });
+
+// Season dropdown
+var season = ui.Select({
+  items: ['Oct-Nov', 'Feb-Mar'],
+  placeholder: 'Select Season',
+  value: 'Oct-Nov'
+});
+
 var runButton = ui.Button('Run Change Detection');
 
 // Add controls to left panel
 controlPanel.add(ui.Label('Mumbai NDVI Change Detection'));
 controlPanel.add(year1);
 controlPanel.add(year2);
+controlPanel.add(season);
 controlPanel.add(runButton);
 
 // Add panels to map
 Map.add(controlPanel);
 Map.add(chartPanel);
 
-// 3. MAIN ANALYSIS FUNCTION
+// Helper function for season dates
+function getSeasonDates(year, seasonChoice) {
+  if (seasonChoice === 'Oct-Nov') {
+    return [year + '-10-01', year + '-11-30'];
+  } else if (seasonChoice === 'Feb-Mar') {
+    return [year + '-02-01', year + '-03-31'];
+  }
+}
+
+// MAIN ANALYSIS FUNCTION
 function runAnalysis() {
-  Map.clear();
+  Map.layers().reset();
   Map.centerObject(mumbai, 9);
 
-  var start = year1.getValue() + '-01-01';
-  var end = year1.getValue() + '-06-30';
-  var start2 = year2.getValue() + '-01-01';
-  var end2 = year2.getValue() + '-06-30';
+  var seasonChoice = season.getValue();
+  var dates1 = getSeasonDates(year1.getValue(), seasonChoice);
+  var dates2 = getSeasonDates(year2.getValue(), seasonChoice);
 
-  var img_t1 = prepS2(start, end);
-  var img_t2 = prepS2(start2, end2);
+  var img_t1 = prepS2(dates1[0], dates1[1]);
+  var img_t2 = prepS2(dates2[0], dates2[1]);
 
   var ndvi_t1 = img_t1.normalizedDifference(['B8','B4']).rename('NDVI_T1');
   var ndvi_t2 = img_t2.normalizedDifference(['B8','B4']).rename('NDVI_T2');
+
+  // Mask non-vegetation (NDVI < 0.2)
+  ndvi_t1 = ndvi_t1.updateMask(ndvi_t1.gt(0.2));
+  ndvi_t2 = ndvi_t2.updateMask(ndvi_t2.gt(0.2));
+
   var ndvi_diff = ndvi_t2.subtract(ndvi_t1).rename('NDVI_Change');
 
   var lossMask = ndvi_diff.lt(-0.1).selfMask().rename('Loss');
@@ -100,7 +127,7 @@ function runAnalysis() {
   Map.addLayer(gainMask, {palette: ['green']}, 'Vegetation Gain');
   Map.addLayer(stableMask, {palette: ['white']}, 'Stable');
 
-  // 4. HISTOGRAM (goes to right panel only)
+  // HISTOGRAM
   var chart = ui.Chart.image.histogram({
     image: ndvi_diff,
     region: mumbai,
@@ -117,7 +144,7 @@ function runAnalysis() {
   chartPanel.add(ui.Label('NDVI Change Histogram'));
   chartPanel.add(chart);
 
-  // 5. EXPORT MASKS AS SHAPEFILES
+  // EXPORT MASKS AS SHAPEFILES
   Export.table.toDrive({
     collection: lossMask.reduceToVectors({
       geometry: mumbai,
@@ -158,5 +185,5 @@ function runAnalysis() {
   });
 }
 
-// 6. BUTTON TRIGGER
+// BUTTON 
 runButton.onClick(runAnalysis);
