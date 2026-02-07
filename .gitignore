@@ -52,6 +52,7 @@ dist/
 # Large Earth Engine exports
 *.csv
 *.zip
+!Shape_Files.zip
 *.tar
 *.gz
 
